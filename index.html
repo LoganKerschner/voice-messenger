@@ -83,7 +83,10 @@
     let mediaRecorder;
     let audioChunks = [];
     let audioBlob = null;
-    let isRecording = false; // Track recording state
+    let isRecording = false;
+
+    // Determine the best MIME type for the device (iPhone vs Android/PC)
+    const mimeType = MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : 'audio/webm';
 
     const recordBtn = document.getElementById('record-btn');
     const recordIcon = document.getElementById('record-icon');
@@ -99,19 +102,20 @@
     const statusText = document.getElementById('status-text');
     const audioPlayer = document.getElementById('audio-player');
 
-    // MOBILE TOGGLE LOGIC
     recordBtn.onclick = async () => {
         if (!isRecording) {
-            // START RECORDING
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder = new MediaRecorder(stream, { mimeType });
                 audioChunks = [];
 
                 mediaRecorder.ondataavailable = (event) => audioChunks.push(event.data);
                 mediaRecorder.onstop = () => {
-                    audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    audioBlob = new Blob(audioChunks, { type: mimeType });
                     audioPlayer.src = URL.createObjectURL(audioBlob);
+                    
+                    // Critical for mobile playback: Load the source into the player
+                    audioPlayer.load(); 
                     
                     recordState.classList.add('hidden');
                     reviewState.classList.remove('hidden');
@@ -121,17 +125,15 @@
                 mediaRecorder.start();
                 isRecording = true;
                 
-                // UI Changes
                 statusRing.classList.add('recording-pulse');
                 recordIcon.classList.remove('rounded-full');
-                recordIcon.classList.add('rounded-sm'); // Turns circle into square
+                recordIcon.classList.add('rounded-sm'); 
                 statusText.innerText = "Recording...";
                 instructionText.innerText = "Tap again to stop";
             } catch (err) {
                 statusText.innerText = "Mic Error: " + err.message;
             }
         } else {
-            // STOP RECORDING
             if (mediaRecorder && mediaRecorder.state !== "inactive") {
                 mediaRecorder.stop();
                 isRecording = false;
@@ -142,14 +144,17 @@
         }
     };
 
-    // PLAYBACK
     playBtn.onclick = () => {
-        audioPlayer.play();
+        // Reset player to start for mobile stability
+        audioPlayer.currentTime = 0; 
+        audioPlayer.play().catch(err => {
+            statusText.innerText = "Playback Error";
+            console.error(err);
+        });
         statusText.innerText = "Playing back...";
         audioPlayer.onended = () => { statusText.innerText = "Review Message"; };
     };
 
-    // RE-RECORD
     redoBtn.onclick = () => {
         reviewState.classList.add('hidden');
         recordState.classList.remove('hidden');
@@ -159,13 +164,13 @@
         isRecording = false;
     };
 
-    // SEND TO BOX
     sendBtn.onclick = async () => {
         statusText.innerText = "Sending to Box...";
         sendBtn.disabled = true;
         
         try {
-            const storageRef = sRef(storage, 'voice_notes/message.wav');
+            // Updated extension to .mp4 for better compatibility
+            const storageRef = sRef(storage, 'voice_notes/message.mp4');
             await uploadBytes(storageRef, audioBlob);
             
             const url = await getDownloadURL(storageRef);
