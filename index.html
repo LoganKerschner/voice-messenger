@@ -35,9 +35,9 @@
             <div id="record-state" class="flex flex-col items-center">
                 <div id="status-ring" class="absolute w-32 h-32 rounded-full border-2 border-transparent transition-all duration-300"></div>
                 <button id="record-btn" class="relative group w-28 h-28 rounded-full bg-gray-800 flex items-center justify-center border-4 border-gray-700 active:scale-95 transition-all cursor-pointer hover:border-red-500/50">
-                    <div class="w-6 h-6 bg-red-500 rounded-full group-active:rounded-sm transition-all"></div>
+                    <div id="record-icon" class="w-6 h-6 bg-red-500 rounded-full transition-all"></div>
                 </button>
-                <p class="text-sm text-gray-500 mt-6">Hold to record</p>
+                <p id="instruction-text" class="text-sm text-gray-500 mt-6 text-center">Tap to start recording</p>
             </div>
 
             <div id="review-state" class="hidden flex flex-col items-center w-full gap-6">
@@ -61,12 +61,10 @@
     </div>
 
 <script type="module">
-    // 1. Modern browser-friendly imports (CDN version)
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
     import { getStorage, ref as sRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
     import { getDatabase, ref as dRef, set } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-    // 2. YOUR SPECIFIC CONFIG (Integrated)
     const firebaseConfig = {
         apiKey: "AIzaSyBEgYf9DxBVeyjp1z4JAYHbJxoV9t4AS24",
         authDomain: "voicebox-87565.firebaseapp.com",
@@ -78,17 +76,20 @@
         measurementId: "G-ZTV9Z9H2XV"
     };
 
-    // 3. Initialize Firebase Services
     const app = initializeApp(firebaseConfig);
     const storage = getStorage(app);
     const database = getDatabase(app);
 
-    // --- APP LOGIC ---
     let mediaRecorder;
     let audioChunks = [];
     let audioBlob = null;
+    let isRecording = false; // Track recording state
 
     const recordBtn = document.getElementById('record-btn');
+    const recordIcon = document.getElementById('record-icon');
+    const instructionText = document.getElementById('instruction-text');
+    const statusRing = document.getElementById('status-ring');
+    
     const playBtn = document.getElementById('play-btn');
     const redoBtn = document.getElementById('redo-btn');
     const sendBtn = document.getElementById('send-btn');
@@ -98,72 +99,83 @@
     const statusText = document.getElementById('status-text');
     const audioPlayer = document.getElementById('audio-player');
 
-    // 1. RECORDING START
-    recordBtn.onpointerdown = async (e) => {
-        e.preventDefault();
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream);
-            audioChunks = [];
+    // MOBILE TOGGLE LOGIC
+    recordBtn.onclick = async () => {
+        if (!isRecording) {
+            // START RECORDING
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
 
-            mediaRecorder.ondataavailable = (event) => audioChunks.push(event.data);
-            mediaRecorder.onstop = () => {
-                audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                audioPlayer.src = URL.createObjectURL(audioBlob);
+                mediaRecorder.ondataavailable = (event) => audioChunks.push(event.data);
+                mediaRecorder.onstop = () => {
+                    audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    audioPlayer.src = URL.createObjectURL(audioBlob);
+                    
+                    recordState.classList.add('hidden');
+                    reviewState.classList.remove('hidden');
+                    statusText.innerText = "Review Message";
+                };
+
+                mediaRecorder.start();
+                isRecording = true;
                 
-                recordState.classList.add('hidden');
-                reviewState.classList.remove('hidden');
-                statusText.innerText = "Review Message";
-            };
-
-            mediaRecorder.start();
-            document.getElementById('status-ring').classList.add('recording-pulse');
-            statusText.innerText = "Recording...";
-        } catch (err) {
-            statusText.innerText = "Mic Error: " + err.message;
+                // UI Changes
+                statusRing.classList.add('recording-pulse');
+                recordIcon.classList.remove('rounded-full');
+                recordIcon.classList.add('rounded-sm'); // Turns circle into square
+                statusText.innerText = "Recording...";
+                instructionText.innerText = "Tap again to stop";
+            } catch (err) {
+                statusText.innerText = "Mic Error: " + err.message;
+            }
+        } else {
+            // STOP RECORDING
+            if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                mediaRecorder.stop();
+                isRecording = false;
+                statusRing.classList.remove('recording-pulse');
+                recordIcon.classList.add('rounded-full');
+                recordIcon.classList.remove('rounded-sm');
+            }
         }
     };
 
-    // 2. RECORDING STOP
-    recordBtn.onpointerup = () => {
-        if (mediaRecorder && mediaRecorder.state !== "inactive") {
-            mediaRecorder.stop();
-            document.getElementById('status-ring').classList.remove('recording-pulse');
-        }
+    // PLAYBACK
+    playBtn.onclick = () => {
+        audioPlayer.play();
+        statusText.innerText = "Playing back...";
+        audioPlayer.onended = () => { statusText.innerText = "Review Message"; };
     };
 
-    // 3. PLAYBACK
-    playBtn.onclick = () => audioPlayer.play();
-
-    // 4. RE-RECORD
+    // RE-RECORD
     redoBtn.onclick = () => {
         reviewState.classList.add('hidden');
         recordState.classList.remove('hidden');
         statusText.innerText = "Ready to Record";
+        instructionText.innerText = "Tap to start recording";
         audioBlob = null;
+        isRecording = false;
     };
 
-    // 5. SEND TO BOX (Firebase Upload)
+    // SEND TO BOX
     sendBtn.onclick = async () => {
         statusText.innerText = "Sending to Box...";
         sendBtn.disabled = true;
         
         try {
-            // A. Upload to Storage
             const storageRef = sRef(storage, 'voice_notes/message.wav');
             await uploadBytes(storageRef, audioBlob);
             
-            // B. Get the Link
             const url = await getDownloadURL(storageRef);
             
-            // C. Alert the Box ESP32 via Database
             await set(dRef(database, 'denver_alert'), {
                 audioUrl: url,
                 time: Date.now()
             });
 
             statusText.innerText = "Delivered!";
-            // Reset after success
             setTimeout(() => {
                 sendBtn.disabled = false;
                 redoBtn.click();
