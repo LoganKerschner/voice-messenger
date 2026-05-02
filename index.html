@@ -62,8 +62,8 @@
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getStorage, ref as sRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
-    import { getDatabase, ref as dRef, set } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+    import { getStorage, ref as sRef, uploadBytes } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+    import { getDatabase, ref as dRef, push } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
     const firebaseConfig = {
         apiKey: "AIzaSyBEgYf9DxBVeyjp1z4JAYHbJxoV9t4AS24",
@@ -85,22 +85,19 @@
     let audioBlob = null;
     let isRecording = false;
 
-    // Determine the best MIME type for the device (iPhone vs Android/PC)
     const mimeType = MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : 'audio/webm';
 
-    const recordBtn = document.getElementById('record-btn');
-    const recordIcon = document.getElementById('record-icon');
+    const recordBtn       = document.getElementById('record-btn');
+    const recordIcon      = document.getElementById('record-icon');
     const instructionText = document.getElementById('instruction-text');
-    const statusRing = document.getElementById('status-ring');
-    
-    const playBtn = document.getElementById('play-btn');
-    const redoBtn = document.getElementById('redo-btn');
-    const sendBtn = document.getElementById('send-btn');
-    
-    const recordState = document.getElementById('record-state');
-    const reviewState = document.getElementById('review-state');
-    const statusText = document.getElementById('status-text');
-    const audioPlayer = document.getElementById('audio-player');
+    const statusRing      = document.getElementById('status-ring');
+    const playBtn         = document.getElementById('play-btn');
+    const redoBtn         = document.getElementById('redo-btn');
+    const sendBtn         = document.getElementById('send-btn');
+    const recordState     = document.getElementById('record-state');
+    const reviewState     = document.getElementById('review-state');
+    const statusText      = document.getElementById('status-text');
+    const audioPlayer     = document.getElementById('audio-player');
 
     recordBtn.onclick = async () => {
         if (!isRecording) {
@@ -113,10 +110,7 @@
                 mediaRecorder.onstop = () => {
                     audioBlob = new Blob(audioChunks, { type: mimeType });
                     audioPlayer.src = URL.createObjectURL(audioBlob);
-                    
-                    // Critical for mobile playback: Load the source into the player
-                    audioPlayer.load(); 
-                    
+                    audioPlayer.load();
                     recordState.classList.add('hidden');
                     reviewState.classList.remove('hidden');
                     statusText.innerText = "Review Message";
@@ -124,10 +118,9 @@
 
                 mediaRecorder.start();
                 isRecording = true;
-                
                 statusRing.classList.add('recording-pulse');
                 recordIcon.classList.remove('rounded-full');
-                recordIcon.classList.add('rounded-sm'); 
+                recordIcon.classList.add('rounded-sm');
                 statusText.innerText = "Recording...";
                 instructionText.innerText = "Tap again to stop";
             } catch (err) {
@@ -145,8 +138,7 @@
     };
 
     playBtn.onclick = () => {
-        // Reset player to start for mobile stability
-        audioPlayer.currentTime = 0; 
+        audioPlayer.currentTime = 0;
         audioPlayer.play().catch(err => {
             statusText.innerText = "Playback Error";
             console.error(err);
@@ -167,17 +159,21 @@
     sendBtn.onclick = async () => {
         statusText.innerText = "Sending to Box...";
         sendBtn.disabled = true;
-        
+
         try {
-            // Updated extension to .mp4 for better compatibility
-            const storageRef = sRef(storage, 'voice_notes/message.mp4');
+            const ext = mimeType === 'audio/mp4' ? 'mp4' : 'webm';
+            const filename = `memos/memo_${Date.now()}.${ext}`;
+
+            const storageRef = sRef(storage, filename);
             await uploadBytes(storageRef, audioBlob);
-            
-            const url = await getDownloadURL(storageRef);
-            
-            await set(dRef(database, 'denver_alert'), {
-                audioUrl: url,
-                time: Date.now()
+
+            const now = new Date();
+            const label = `Memo: ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
+
+            await push(dRef(database, 'memos'), {
+                label:    label,
+                filename: filename,
+                heard:    false
             });
 
             statusText.innerText = "Delivered!";
@@ -185,6 +181,7 @@
                 sendBtn.disabled = false;
                 redoBtn.click();
             }, 2000);
+
         } catch (err) {
             console.error(err);
             statusText.innerText = "Upload Failed!";
